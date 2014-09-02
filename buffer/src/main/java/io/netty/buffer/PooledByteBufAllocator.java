@@ -38,6 +38,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
     private static final int DEFAULT_NORMAL_CACHE_SIZE;
     private static final int DEFAULT_MAX_CACHED_BUFFER_CAPACITY;
     private static final int DEFAULT_CACHE_TRIM_INTERVAL;
+    private static final boolean DEFAULT_CACHE_FOR_DIFFERENT_THREADS;
 
     private static final int MIN_PAGE_SIZE = 4096;
     private static final int MAX_CHUNK_SIZE = (int) (((long) Integer.MAX_VALUE + 1) / 2);
@@ -94,6 +95,11 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         DEFAULT_CACHE_TRIM_INTERVAL = SystemPropertyUtil.getInt(
                 "io.netty.allocator.cacheTrimInterval", 8192);
 
+        // if false released memory will only be cached in PoolThreadCache if the allocation / deallocation threads
+        // are the same.
+        DEFAULT_CACHE_FOR_DIFFERENT_THREADS = SystemPropertyUtil.getBoolean(
+                "io.netty.allocator.cacheForDifferentThreads", false);
+
         if (logger.isDebugEnabled()) {
             logger.debug("-Dio.netty.allocator.numHeapArenas: {}", DEFAULT_NUM_HEAP_ARENA);
             logger.debug("-Dio.netty.allocator.numDirectArenas: {}", DEFAULT_NUM_DIRECT_ARENA);
@@ -113,6 +119,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             logger.debug("-Dio.netty.allocator.normalCacheSize: {}", DEFAULT_NORMAL_CACHE_SIZE);
             logger.debug("-Dio.netty.allocator.maxCachedBufferCapacity: {}", DEFAULT_MAX_CACHED_BUFFER_CAPACITY);
             logger.debug("-Dio.netty.allocator.cacheTrimInterval: {}", DEFAULT_CACHE_TRIM_INTERVAL);
+            logger.debug("-Dio.netty.allocator.cacheForDifferentThreads: {}", DEFAULT_CACHE_FOR_DIFFERENT_THREADS);
         }
     }
 
@@ -141,11 +148,20 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
 
     public PooledByteBufAllocator(boolean preferDirect, int nHeapArena, int nDirectArena, int pageSize, int maxOrder) {
         this(preferDirect, nHeapArena, nDirectArena, pageSize, maxOrder,
-                DEFAULT_TINY_CACHE_SIZE, DEFAULT_SMALL_CACHE_SIZE, DEFAULT_NORMAL_CACHE_SIZE);
+                DEFAULT_TINY_CACHE_SIZE, DEFAULT_SMALL_CACHE_SIZE,
+                DEFAULT_NORMAL_CACHE_SIZE, DEFAULT_CACHE_FOR_DIFFERENT_THREADS);
+    }
+
+    @Deprecated
+    public PooledByteBufAllocator(boolean preferDirect, int nHeapArena, int nDirectArena, int pageSize, int maxOrder,
+                                  int tinyCacheSize, int smallCacheSize, int normalCacheSize) {
+        this(preferDirect, nHeapArena, nDirectArena, pageSize, maxOrder,
+                tinyCacheSize, smallCacheSize, normalCacheSize, DEFAULT_CACHE_FOR_DIFFERENT_THREADS);
     }
 
     public PooledByteBufAllocator(boolean preferDirect, int nHeapArena, int nDirectArena, int pageSize, int maxOrder,
-                                  int tinyCacheSize, int smallCacheSize, int normalCacheSize) {
+                                  int tinyCacheSize, int smallCacheSize, int normalCacheSize,
+                                  boolean cacheForDifferentThreads) {
         super(preferDirect);
         threadCache = new PoolThreadLocalCache();
         this.tinyCacheSize = tinyCacheSize;
@@ -165,7 +181,8 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         if (nHeapArena > 0) {
             heapArenas = newArenaArray(nHeapArena);
             for (int i = 0; i < heapArenas.length; i ++) {
-                heapArenas[i] = new PoolArena.HeapArena(this, pageSize, maxOrder, pageShifts, chunkSize);
+                heapArenas[i] = new PoolArena.HeapArena(
+                        this, pageSize, maxOrder, pageShifts, chunkSize, cacheForDifferentThreads);
             }
         } else {
             heapArenas = null;
@@ -174,7 +191,8 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         if (nDirectArena > 0) {
             directArenas = newArenaArray(nDirectArena);
             for (int i = 0; i < directArenas.length; i ++) {
-                directArenas[i] = new PoolArena.DirectArena(this, pageSize, maxOrder, pageShifts, chunkSize);
+                directArenas[i] = new PoolArena.DirectArena(
+                        this, pageSize, maxOrder, pageShifts, chunkSize, cacheForDifferentThreads);
             }
         } else {
             directArenas = null;

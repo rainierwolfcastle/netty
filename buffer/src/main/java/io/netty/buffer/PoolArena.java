@@ -27,6 +27,7 @@ abstract class PoolArena<T> {
 
     final PooledByteBufAllocator parent;
 
+    private final boolean cacheForDifferentThreads;
     private final int maxOrder;
     final int pageSize;
     final int pageShifts;
@@ -46,12 +47,14 @@ abstract class PoolArena<T> {
     // TODO: Test if adding padding helps under contention
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
 
-    protected PoolArena(PooledByteBufAllocator parent, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+    protected PoolArena(PooledByteBufAllocator parent, int pageSize, int maxOrder, int pageShifts, int chunkSize,
+                        boolean cacheForDifferentThreads) {
         this.parent = parent;
         this.pageSize = pageSize;
         this.maxOrder = maxOrder;
         this.pageShifts = pageShifts;
         this.chunkSize = chunkSize;
+        this.cacheForDifferentThreads = cacheForDifferentThreads;
         subpageOverflowMask = ~(pageSize - 1);
         tinySubpagePools = newSubpagePoolArray(numTinySubpagePools);
         for (int i = 0; i < tinySubpagePools.length; i ++) {
@@ -187,15 +190,18 @@ abstract class PoolArena<T> {
         buf.initUnpooled(newUnpooledChunk(reqCapacity), reqCapacity);
     }
 
-    void free(PoolChunk<T> chunk, long handle, int normCapacity) {
+    void free(PoolChunk<T> chunk, long handle, int normCapacity, boolean sameThreads) {
         if (chunk.unpooled) {
             destroyChunk(chunk);
         } else {
-            PoolThreadCache cache = parent.threadCache.get();
-            if (cache.add(this, chunk, handle, normCapacity)) {
-                // cached so not free it.
-                return;
+            if (sameThreads || cacheForDifferentThreads) {
+                PoolThreadCache cache = parent.threadCache.get();
+                if (cache.add(this, chunk, handle, normCapacity)) {
+                    // cached so not free it.
+                    return;
+                }
             }
+
             synchronized (this) {
                 chunk.parent.free(chunk, handle);
             }
@@ -295,7 +301,7 @@ abstract class PoolArena<T> {
         buf.setIndex(readerIndex, writerIndex);
 
         if (freeOldMemory) {
-            free(oldChunk, oldHandle, oldMaxLength);
+            free(oldChunk, oldHandle, oldMaxLength, buf.initThread == Thread.currentThread());
         }
     }
 
@@ -377,8 +383,9 @@ abstract class PoolArena<T> {
 
     static final class HeapArena extends PoolArena<byte[]> {
 
-        HeapArena(PooledByteBufAllocator parent, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
-            super(parent, pageSize, maxOrder, pageShifts, chunkSize);
+        HeapArena(PooledByteBufAllocator parent, int pageSize, int maxOrder,
+                  int pageShifts, int chunkSize, boolean cacheForDifferentThreads) {
+            super(parent, pageSize, maxOrder, pageShifts, chunkSize, cacheForDifferentThreads);
         }
 
         @Override
@@ -420,8 +427,9 @@ abstract class PoolArena<T> {
 
         private static final boolean HAS_UNSAFE = PlatformDependent.hasUnsafe();
 
-        DirectArena(PooledByteBufAllocator parent, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
-            super(parent, pageSize, maxOrder, pageShifts, chunkSize);
+        DirectArena(PooledByteBufAllocator parent, int pageSize, int maxOrder,
+                    int pageShifts, int chunkSize, boolean cacheForDifferentThreads) {
+            super(parent, pageSize, maxOrder, pageShifts, chunkSize, cacheForDifferentThreads);
         }
 
         @Override
