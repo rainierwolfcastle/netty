@@ -36,6 +36,7 @@ EXAMPLE_MAP=(
   'sctpecho-client:io.netty.example.sctp.SctpEchoClient'
   'sctpecho-server:io.netty.example.sctp.SctpEchoServer'
   'localecho:io.netty.example.localecho.LocalEcho'
+  'coap-server:io.netty.example.coap.CoapServer'
 )
 
 EXAMPLE=''
